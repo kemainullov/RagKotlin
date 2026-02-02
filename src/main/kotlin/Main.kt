@@ -10,6 +10,7 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.io.File
+import kotlin.math.sqrt
 
 // ---------- Ollama API ----------
 
@@ -73,6 +74,20 @@ fun splitIntoChunks(text: String, chunkSize: Int = 500, overlap: Int = 50): List
     return chunks
 }
 
+// ---------- Косинусное сходство ----------
+
+fun cosineSimilarity(a: List<Float>, b: List<Float>): Float {
+    var dot = 0f
+    var normA = 0f
+    var normB = 0f
+    for (i in a.indices) {
+        dot += a[i] * b[i]
+        normA += a[i] * a[i]
+        normB += b[i] * b[i]
+    }
+    return dot / (sqrt(normA) * sqrt(normB))
+}
+
 // ---------- Main ----------
 
 fun main() = runBlocking {
@@ -119,4 +134,24 @@ fun main() = runBlocking {
 
     outputFile.writeText(prettyJson.encodeToString(index))
     println("\nИндекс сохранён в ${outputFile.name} (${index.size} записей)")
+
+    // ---------- Проверка: матрица косинусного сходства ----------
+    println("\n--- Матрица косинусного сходства ---\n")
+
+    // Заголовок: короткие метки для каждого чанка
+    val labels = index.map { "${it.source.removeSuffix(".txt")}[${it.chunkIndex}]" }
+    val colWidth = 16
+
+    print("".padEnd(colWidth))
+    for (label in labels) print(label.padStart(colWidth))
+    println()
+
+    for (i in index.indices) {
+        print(labels[i].padEnd(colWidth))
+        for (j in index.indices) {
+            val sim = cosineSimilarity(index[i].embedding, index[j].embedding)
+            print("%.4f".format(sim).padStart(colWidth))
+        }
+        println()
+    }
 }
