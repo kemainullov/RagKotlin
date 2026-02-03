@@ -182,16 +182,14 @@ fun main() = runBlocking {
         return@runBlocking
     }
 
-    val questions = listOf(
-        "Что такое RAG и из каких этапов он состоит?",
-        "Как работают корутины в Kotlin?",
-        "Какой эндпоинт Ollama используется для генерации эмбеддингов?"
-    )
-
     OllamaClient().use { ollama ->
         DeepSeekClient(apiKey).use { deepseek ->
-            for (question in questions) {
-                println("=".repeat(80))
+            while (true) {
+                print("\nВведите вопрос (или 'выход' для завершения): ")
+                val question = readlnOrNull()?.trim()
+                if (question.isNullOrBlank() || question == "выход") break
+
+                println("\n" + "=".repeat(80))
                 println("ВОПРОС: $question")
                 println("=".repeat(80))
 
@@ -223,9 +221,8 @@ $context
 
                 val answerWithRag = deepseek.chat(ragPrompt)
                 println(answerWithRag)
-
-                println()
             }
         }
     }
+    println("\nЗавершено.")
 }

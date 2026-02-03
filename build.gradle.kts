@@ -8,6 +8,10 @@ application {
     mainClass.set("MainKt")
 }
 
+tasks.named<JavaExec>("run") {
+    standardInput = System.`in`
+}
+
 group = "com.project"
 version = "1.0-SNAPSHOT"
 
