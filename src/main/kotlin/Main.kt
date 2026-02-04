@@ -153,6 +153,73 @@ fun findRelevantChunks(index: List<IndexEntry>, queryEmbedding: FloatArray, topN
         .take(topN)
 }
 
+// ---------- Фильтрация по порогу ----------
+
+fun filterByThreshold(
+    chunks: List<Pair<IndexEntry, Float>>,
+    threshold: Float = 0.78f
+): List<Pair<IndexEntry, Float>> {
+    return chunks.filter { it.second >= threshold }
+}
+
+// ---------- LLM-реранкинг ----------
+
+suspend fun rerankWithLLM(
+    chunks: List<Pair<IndexEntry, Float>>,
+    question: String,
+    llm: DeepSeekClient
+): List<Pair<IndexEntry, Float>> {
+    val scored = mutableListOf<Pair<IndexEntry, Float>>()
+    for ((entry, cosineScore) in chunks) {
+        val prompt = """Оцени релевантность текста для ответа на вопрос.
+Ответь ТОЛЬКО одним числом от 0 до 10, где 0 — совсем не релевантен, 10 — идеально релевантен.
+
+Вопрос: $question
+
+Текст: ${entry.text}"""
+
+        val response = llm.chat(prompt)
+        val llmScore = response.trim().filter { it.isDigit() || it == '.' }
+            .toFloatOrNull() ?: 0f
+        // Нормализуем LLM-оценку к диапазону 0..1 и комбинируем с cosine score
+        val combinedScore = cosineScore * 0.4f + (llmScore / 10f) * 0.6f
+        scored.add(entry to combinedScore)
+    }
+    return scored
+        .filter { it.second >= 0.5f }
+        .sortedByDescending { it.second }
+}
+
+// ---------- Вспомогательная функция для RAG-запроса ----------
+
+suspend fun askWithContext(
+    chunks: List<Pair<IndexEntry, Float>>,
+    question: String,
+    llm: DeepSeekClient
+): String {
+    if (chunks.isEmpty()) return "Релевантные документы не найдены — ответ невозможен."
+
+    val context = chunks.joinToString("\n\n") { it.first.text }
+    val ragPrompt = """На основе приведённого контекста ответь на вопрос.
+Используй только информацию из контекста. Если в контексте нет ответа, скажи об этом.
+
+Контекст:
+$context
+
+Вопрос: $question"""
+    return llm.chat(ragPrompt)
+}
+
+fun printChunks(label: String, chunks: List<Pair<IndexEntry, Float>>) {
+    if (chunks.isEmpty()) {
+        println("  Все чанки отсечены фильтром.")
+    } else {
+        for ((entry, score) in chunks) {
+            println("  [$label] [${entry.source} #${entry.chunkIndex}] score=%.4f".format(score))
+        }
+    }
+}
+
 // ---------- Main ----------
 
 fun main() = runBlocking {
@@ -165,7 +232,7 @@ fun main() = runBlocking {
         return@runBlocking
     }
     val index = jsonParser.decodeFromString<List<IndexEntry>>(indexFile.readText())
-    println("Загружен индекс: ${index.size} чанков\n")
+    println("Загружен индекс: ${index.size} чанков")
 
     // API ключ: сначала local.properties, потом переменная окружения
     val props = File("local.properties")
@@ -182,6 +249,9 @@ fun main() = runBlocking {
         return@runBlocking
     }
 
+    val threshold = 0.78f
+    println("Порог фильтрации: $threshold")
+
     OllamaClient().use { ollama ->
         DeepSeekClient(apiKey).use { deepseek ->
             while (true) {
@@ -193,34 +263,34 @@ fun main() = runBlocking {
                 println("ВОПРОС: $question")
                 println("=".repeat(80))
 
-                // --- Режим без RAG ---
-                println("\n--- Ответ БЕЗ RAG ---\n")
-                val answerNoRag = deepseek.chat(question)
-                println(answerNoRag)
-
-                // --- Режим с RAG ---
-                println("\n--- Ответ С RAG ---\n")
-
+                // Общий поиск чанков
                 val queryEmbedding = ollama.embed(question)
-                val relevant = findRelevantChunks(index, queryEmbedding)
+                val allChunks = findRelevantChunks(index, queryEmbedding)
 
-                println("Найденные чанки:")
-                for ((entry, score) in relevant) {
-                    println("  [${entry.source} #${entry.chunkIndex}] score=%.4f".format(score))
-                }
+                println("\nНайденные чанки (cosine similarity):")
+                printChunks("cosine", allChunks)
+
+                // ===== 1. RAG без фильтра =====
+                println("\n--- 1. RAG без фильтра (${allChunks.size} чанков) ---\n")
+                val answer1 = askWithContext(allChunks, question, deepseek)
+                println(answer1)
+
+                // ===== 2. RAG + порог =====
+                val filtered = filterByThreshold(allChunks, threshold)
+                println("\n--- 2. RAG + порог $threshold (${filtered.size} из ${allChunks.size} чанков) ---\n")
+                printChunks("порог", filtered)
                 println()
+                val answer2 = askWithContext(filtered, question, deepseek)
+                println(answer2)
 
-                val context = relevant.joinToString("\n\n") { it.first.text }
-                val ragPrompt = """На основе приведённого контекста ответь на вопрос.
-Используй только информацию из контекста. Если в контексте нет ответа, скажи об этом.
-
-Контекст:
-$context
-
-Вопрос: $question"""
-
-                val answerWithRag = deepseek.chat(ragPrompt)
-                println(answerWithRag)
+                // ===== 3. RAG + LLM-реранкинг =====
+                println("\n--- 3. RAG + LLM-реранкинг ---\n")
+                val reranked = rerankWithLLM(allChunks, question, deepseek)
+                println("После реранкинга (${reranked.size} из ${allChunks.size} чанков):")
+                printChunks("rerank", reranked)
+                println()
+                val answer3 = askWithContext(reranked, question, deepseek)
+                println(answer3)
             }
         }
     }
