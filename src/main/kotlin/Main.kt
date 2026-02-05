@@ -192,6 +192,9 @@ suspend fun rerankWithLLM(
 
 // ---------- Вспомогательная функция для RAG-запроса ----------
 
+fun buildSourceLabel(entry: IndexEntry, index: Int): String =
+    "Источник ${index + 1}: ${entry.source}, чанк #${entry.chunkIndex}"
+
 suspend fun askWithContext(
     chunks: List<Pair<IndexEntry, Float>>,
     question: String,
@@ -199,9 +202,17 @@ suspend fun askWithContext(
 ): String {
     if (chunks.isEmpty()) return "Релевантные документы не найдены — ответ невозможен."
 
-    val context = chunks.joinToString("\n\n") { it.first.text }
+    val context = chunks.mapIndexed { i, (entry, _) ->
+        "[${buildSourceLabel(entry, i)}]\n${entry.text}"
+    }.joinToString("\n\n")
+
     val ragPrompt = """На основе приведённого контекста ответь на вопрос.
 Используй только информацию из контекста. Если в контексте нет ответа, скажи об этом.
+
+ВАЖНО: В ответе обязательно:
+1. Указывай источники в формате [Источник N] после каждого утверждения или абзаца.
+2. В конце ответа добавь раздел "Источники:" со списком всех использованных источников.
+3. Приводи краткие цитаты из контекста, подтверждающие твои утверждения.
 
 Контекст:
 $context
@@ -222,11 +233,37 @@ fun printChunks(label: String, chunks: List<Pair<IndexEntry, Float>>) {
 
 // ---------- Main ----------
 
+suspend fun processQuestion(
+    question: String,
+    index: List<IndexEntry>,
+    ollama: OllamaClient,
+    deepseek: DeepSeekClient,
+    threshold: Float
+): String {
+    println("\n" + "=".repeat(80))
+    println("ВОПРОС: $question")
+    println("=".repeat(80))
+
+    // Поиск + фильтрация
+    val queryEmbedding = ollama.embed(question)
+    val allChunks = findRelevantChunks(index, queryEmbedding)
+    val filtered = filterByThreshold(allChunks, threshold)
+
+    println("\nНайденные чанки (cosine similarity):")
+    printChunks("cosine", allChunks)
+    println("\nПосле фильтрации по порогу $threshold: ${filtered.size} из ${allChunks.size}")
+
+    // Ответ с цитатами и источниками
+    println("\n--- Ответ RAG с источниками ---\n")
+    val answer = askWithContext(filtered, question, deepseek)
+    println(answer)
+    return answer
+}
+
 fun main() = runBlocking {
     val indexFile = File("index.json")
     val jsonParser = Json { ignoreUnknownKeys = true }
 
-    // Загрузка индекса
     if (!indexFile.exists()) {
         println("Файл index.json не найден. Сначала запустите индексацию (День 16).")
         return@runBlocking
@@ -234,7 +271,6 @@ fun main() = runBlocking {
     val index = jsonParser.decodeFromString<List<IndexEntry>>(indexFile.readText())
     println("Загружен индекс: ${index.size} чанков")
 
-    // API ключ: сначала local.properties, потом переменная окружения
     val props = File("local.properties")
         .takeIf { it.exists() }
         ?.readLines()
@@ -254,43 +290,46 @@ fun main() = runBlocking {
 
     OllamaClient().use { ollama ->
         DeepSeekClient(apiKey).use { deepseek ->
+
+            // ===== Тестовый прогон: 5 вопросов =====
+            val testQuestions = listOf(
+                "Что такое RAG и из каких этапов он состоит?",
+                "Как работают корутины в Kotlin?",
+                "Какой эндпоинт Ollama используется для генерации эмбеддингов?",
+                "Что такое косинусное сходство и зачем оно нужно?",
+//                "Какой компание разработан язык Kotlin?"
+            )
+
+            println("\n" + "#".repeat(80))
+            println("# ТЕСТОВЫЙ ПРОГОН: 4 вопросов — проверка цитат и источников")
+            println("#".repeat(80))
+
+            var withSources = 0
+            for ((i, q) in testQuestions.withIndex()) {
+                val answer = processQuestion(q, index, ollama, deepseek, threshold)
+                val hasCitations = answer.contains("[Источник") || answer.contains("Источник")
+                if (hasCitations) withSources++
+                println("\n>> Проверка: ссылки на источники — ${if (hasCitations) "ЕСТЬ" else "НЕТ"}")
+            }
+
+            println("\n" + "#".repeat(80))
+            println("# ИТОГ ТЕСТОВОГО ПРОГОНА")
+            println("# Ответов с источниками: $withSources из ${testQuestions.size}")
+            println("#".repeat(80))
+
+            // --- Интерактивный режим ---
+            println("\n" + "#".repeat(80))
+            println("# ИНТЕРАКТИВНЫЙ РЕЖИМ")
+            println("#".repeat(80))
+
             while (true) {
                 print("\nВведите вопрос (или 'выход' для завершения): ")
                 val question = readlnOrNull()?.trim()
                 if (question.isNullOrBlank() || question == "выход") break
 
-                println("\n" + "=".repeat(80))
-                println("ВОПРОС: $question")
-                println("=".repeat(80))
-
-                // Общий поиск чанков
-                val queryEmbedding = ollama.embed(question)
-                val allChunks = findRelevantChunks(index, queryEmbedding)
-
-                println("\nНайденные чанки (cosine similarity):")
-                printChunks("cosine", allChunks)
-
-                // ===== 1. RAG без фильтра =====
-                println("\n--- 1. RAG без фильтра (${allChunks.size} чанков) ---\n")
-                val answer1 = askWithContext(allChunks, question, deepseek)
-                println(answer1)
-
-                // ===== 2. RAG + порог =====
-                val filtered = filterByThreshold(allChunks, threshold)
-                println("\n--- 2. RAG + порог $threshold (${filtered.size} из ${allChunks.size} чанков) ---\n")
-                printChunks("порог", filtered)
-                println()
-                val answer2 = askWithContext(filtered, question, deepseek)
-                println(answer2)
-
-                // ===== 3. RAG + LLM-реранкинг =====
-                println("\n--- 3. RAG + LLM-реранкинг ---\n")
-                val reranked = rerankWithLLM(allChunks, question, deepseek)
-                println("После реранкинга (${reranked.size} из ${allChunks.size} чанков):")
-                printChunks("rerank", reranked)
-                println()
-                val answer3 = askWithContext(reranked, question, deepseek)
-                println(answer3)
+                val answer = processQuestion(question, index, ollama, deepseek, threshold)
+                val hasCitations = answer.contains("[Источник") || answer.contains("Источник")
+                println("\n>> Проверка: ссылки на источники — ${if (hasCitations) "ЕСТЬ" else "НЕТ"}")
             }
         }
     }
