@@ -146,7 +146,11 @@ fun cosineSimilarity(a: List<Float>, b: FloatArray): Float {
 
 // ---------- Поиск релевантных чанков ----------
 
-fun findRelevantChunks(index: List<IndexEntry>, queryEmbedding: FloatArray, topN: Int = 3): List<Pair<IndexEntry, Float>> {
+fun findRelevantChunks(
+    index: List<IndexEntry>,
+    queryEmbedding: FloatArray,
+    topN: Int = 3
+): List<Pair<IndexEntry, Float>> {
     return index
         .map { it to cosineSimilarity(it.embedding, queryEmbedding) }
         .sortedByDescending { it.second }
@@ -198,7 +202,8 @@ fun buildSourceLabel(entry: IndexEntry, index: Int): String =
 suspend fun askWithContext(
     chunks: List<Pair<IndexEntry, Float>>,
     question: String,
-    llm: DeepSeekClient
+    llm: DeepSeekClient,
+    history: List<Pair<String, String>> = emptyList()
 ): String {
     if (chunks.isEmpty()) return "Релевантные документы не найдены — ответ невозможен."
 
@@ -206,8 +211,23 @@ suspend fun askWithContext(
         "[${buildSourceLabel(entry, i)}]\n${entry.text}"
     }.joinToString("\n\n")
 
-    val ragPrompt = """На основе приведённого контекста ответь на вопрос.
+    val historySection = if (history.isNotEmpty()) {
+        val formatted = history.takeLast(5).joinToString("\n") { (q, a) ->
+            "Пользователь: $q\nАссистент: $a"
+        }
+        """
+История диалога:
+$formatted
+
+"""
+    } else ""
+
+    val ragPrompt =
+        """Ты — ассистент с доступом к базе документов. Отвечай на вопросы, используя контекст и историю диалога.
+$historySection
+На основе приведённого контекста ответь на вопрос.
 Используй только информацию из контекста. Если в контексте нет ответа, скажи об этом.
+Учитывай историю диалога для понимания местоимений и ссылок на предыдущие темы.
 
 ВАЖНО: В ответе обязательно:
 1. Указывай источники в формате [Источник N] после каждого утверждения или абзаца.
@@ -238,10 +258,12 @@ suspend fun processQuestion(
     index: List<IndexEntry>,
     ollama: OllamaClient,
     deepseek: DeepSeekClient,
-    threshold: Float
+    threshold: Float,
+    history: List<Pair<String, String>> = emptyList()
 ): String {
     println("\n" + "=".repeat(80))
     println("ВОПРОС: $question")
+    if (history.isNotEmpty()) println("(история: ${history.size} сообщений)")
     println("=".repeat(80))
 
     // Поиск + фильтрация
@@ -255,7 +277,7 @@ suspend fun processQuestion(
 
     // Ответ с цитатами и источниками
     println("\n--- Ответ RAG с источниками ---\n")
-    val answer = askWithContext(filtered, question, deepseek)
+    val answer = askWithContext(filtered, question, deepseek, history)
     println(answer)
     return answer
 }
@@ -285,51 +307,36 @@ fun main() = runBlocking {
         return@runBlocking
     }
 
-    val threshold = 0.78f
+    val threshold = 0.72f
     println("Порог фильтрации: $threshold")
 
     OllamaClient().use { ollama ->
         DeepSeekClient(apiKey).use { deepseek ->
 
-            // ===== Тестовый прогон: 5 вопросов =====
-            val testQuestions = listOf(
-                "Что такое RAG и из каких этапов он состоит?",
-                "Как работают корутины в Kotlin?",
-                "Какой эндпоинт Ollama используется для генерации эмбеддингов?",
-                "Что такое косинусное сходство и зачем оно нужно?",
-//                "Какой компание разработан язык Kotlin?"
-            )
-
             println("\n" + "#".repeat(80))
-            println("# ТЕСТОВЫЙ ПРОГОН: 4 вопросов — проверка цитат и источников")
+            println("# МИНИ-ЧАТ С ПАМЯТЬЮ")
+            println("# Команды: 'очистить' — сбросить историю, 'выход' — завершить")
             println("#".repeat(80))
 
-            var withSources = 0
-            for ((i, q) in testQuestions.withIndex()) {
-                val answer = processQuestion(q, index, ollama, deepseek, threshold)
-                val hasCitations = answer.contains("[Источник") || answer.contains("Источник")
-                if (hasCitations) withSources++
-                println("\n>> Проверка: ссылки на источники — ${if (hasCitations) "ЕСТЬ" else "НЕТ"}")
-            }
-
-            println("\n" + "#".repeat(80))
-            println("# ИТОГ ТЕСТОВОГО ПРОГОНА")
-            println("# Ответов с источниками: $withSources из ${testQuestions.size}")
-            println("#".repeat(80))
-
-            // --- Интерактивный режим ---
-            println("\n" + "#".repeat(80))
-            println("# ИНТЕРАКТИВНЫЙ РЕЖИМ")
-            println("#".repeat(80))
+            val history = mutableListOf<Pair<String, String>>()
 
             while (true) {
-                print("\nВведите вопрос (или 'выход' для завершения): ")
+                print("\nВы: ")
                 val question = readlnOrNull()?.trim()
                 if (question.isNullOrBlank() || question == "выход") break
 
-                val answer = processQuestion(question, index, ollama, deepseek, threshold)
+                if (question == "очистить") {
+                    history.clear()
+                    println("\n>> История диалога очищена.")
+                    continue
+                }
+
+                val answer = processQuestion(question, index, ollama, deepseek, threshold, history)
+                history.add(question to answer)
+
                 val hasCitations = answer.contains("[Источник") || answer.contains("Источник")
-                println("\n>> Проверка: ссылки на источники — ${if (hasCitations) "ЕСТЬ" else "НЕТ"}")
+                println("\n>> Ссылки на источники: ${if (hasCitations) "ЕСТЬ" else "НЕТ"}")
+                println(">> История: ${history.size} сообщений")
             }
         }
     }
