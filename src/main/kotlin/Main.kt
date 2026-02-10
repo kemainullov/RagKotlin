@@ -149,7 +149,7 @@ fun cosineSimilarity(a: List<Float>, b: FloatArray): Float {
 fun findRelevantChunks(
     index: List<IndexEntry>,
     queryEmbedding: FloatArray,
-    topN: Int = 3
+    topN: Int = 5
 ): List<Pair<IndexEntry, Float>> {
     return index
         .map { it to cosineSimilarity(it.embedding, queryEmbedding) }
@@ -166,32 +166,62 @@ fun filterByThreshold(
     return chunks.filter { it.second >= threshold }
 }
 
-// ---------- LLM-реранкинг ----------
+// ---------- Индексация документов ----------
 
-suspend fun rerankWithLLM(
-    chunks: List<Pair<IndexEntry, Float>>,
-    question: String,
-    llm: DeepSeekClient
-): List<Pair<IndexEntry, Float>> {
-    val scored = mutableListOf<Pair<IndexEntry, Float>>()
-    for ((entry, cosineScore) in chunks) {
-        val prompt = """Оцени релевантность текста для ответа на вопрос.
-Ответь ТОЛЬКО одним числом от 0 до 10, где 0 — совсем не релевантен, 10 — идеально релевантен.
+suspend fun buildIndex(ollama: OllamaClient, dataDirs: List<String>): List<IndexEntry> {
+    val entries = mutableListOf<IndexEntry>()
+    val extensions = listOf("txt", "md")
 
-Вопрос: $question
-
-Текст: ${entry.text}"""
-
-        val response = llm.chat(prompt)
-        val llmScore = response.trim().filter { it.isDigit() || it == '.' }
-            .toFloatOrNull() ?: 0f
-        // Нормализуем LLM-оценку к диапазону 0..1 и комбинируем с cosine score
-        val combinedScore = cosineScore * 0.4f + (llmScore / 10f) * 0.6f
-        scored.add(entry to combinedScore)
+    // Собираем файлы из указанных директорий
+    val files = dataDirs.flatMap { dir ->
+        val dirFile = File(dir)
+        if (dirFile.isDirectory) {
+            dirFile.listFiles()?.filter { it.extension in extensions }?.toList() ?: emptyList()
+        } else if (dirFile.isFile && dirFile.extension in extensions) {
+            listOf(dirFile)
+        } else {
+            emptyList()
+        }
     }
-    return scored
-        .filter { it.second >= 0.5f }
-        .sortedByDescending { it.second }
+
+    // Добавляем README.md из корня
+    val readme = File("README.md")
+    val allFiles = if (readme.exists() && files.none { it.absolutePath == readme.absolutePath }) {
+        files + readme
+    } else {
+        files
+    }
+
+    println("Найдено файлов для индексации: ${allFiles.size}")
+    for (file in allFiles) {
+        val text = file.readText()
+        val chunks = splitIntoChunks(text)
+        println("  ${file.name}: ${chunks.size} чанков")
+        for ((i, chunk) in chunks.withIndex()) {
+            val embedding = ollama.embed(chunk)
+            entries.add(IndexEntry(file.name, i, chunk, embedding.toList()))
+        }
+    }
+
+    val json = Json { prettyPrint = true }
+    File("index.json").writeText(json.encodeToString(entries))
+    println("Индекс сохранён: ${entries.size} чанков")
+    return entries
+}
+
+// ---------- MCP: Git-интеграция ----------
+
+fun getCurrentGitBranch(): String {
+    return try {
+        val process = ProcessBuilder("git", "rev-parse", "--abbrev-ref", "HEAD")
+            .redirectErrorStream(true)
+            .start()
+        val result = process.inputStream.bufferedReader().readText().trim()
+        process.waitFor()
+        if (process.exitValue() == 0) result else "неизвестна"
+    } catch (_: Exception) {
+        "неизвестна"
+    }
 }
 
 // ---------- Вспомогательная функция для RAG-запроса ----------
@@ -203,7 +233,8 @@ suspend fun askWithContext(
     chunks: List<Pair<IndexEntry, Float>>,
     question: String,
     llm: DeepSeekClient,
-    history: List<Pair<String, String>> = emptyList()
+    history: List<Pair<String, String>> = emptyList(),
+    gitBranch: String = ""
 ): String {
     if (chunks.isEmpty()) return "Релевантные документы не найдены — ответ невозможен."
 
@@ -222,8 +253,11 @@ $formatted
 """
     } else ""
 
+    val branchInfo = if (gitBranch.isNotBlank()) "Текущая git-ветка: $gitBranch\n" else ""
+
     val ragPrompt =
-        """Ты — ассистент с доступом к базе документов. Отвечай на вопросы, используя контекст и историю диалога.
+        """Ты — ассистент разработчика проекта RagKotlin. ${branchInfo}Отвечай на вопросы, используя контекст и историю диалога.
+Помогай с кодом, архитектурой и стилем кода проекта. Подсказывай фрагменты кода и правила стиля, когда это уместно.
 $historySection
 На основе приведённого контекста ответь на вопрос.
 Используй только информацию из контекста. Если в контексте нет ответа, скажи об этом.
@@ -241,16 +275,6 @@ $context
     return llm.chat(ragPrompt)
 }
 
-fun printChunks(label: String, chunks: List<Pair<IndexEntry, Float>>) {
-    if (chunks.isEmpty()) {
-        println("  Все чанки отсечены фильтром.")
-    } else {
-        for ((entry, score) in chunks) {
-            println("  [$label] [${entry.source} #${entry.chunkIndex}] score=%.4f".format(score))
-        }
-    }
-}
-
 // ---------- Main ----------
 
 suspend fun processQuestion(
@@ -259,39 +283,19 @@ suspend fun processQuestion(
     ollama: OllamaClient,
     deepseek: DeepSeekClient,
     threshold: Float,
-    history: List<Pair<String, String>> = emptyList()
+    history: List<Pair<String, String>> = emptyList(),
+    gitBranch: String = ""
 ): String {
-    println("\n" + "=".repeat(80))
-    println("ВОПРОС: $question")
-    if (history.isNotEmpty()) println("(история: ${history.size} сообщений)")
-    println("=".repeat(80))
-
-    // Поиск + фильтрация
     val queryEmbedding = ollama.embed(question)
     val allChunks = findRelevantChunks(index, queryEmbedding)
     val filtered = filterByThreshold(allChunks, threshold)
-
-    println("\nНайденные чанки (cosine similarity):")
-    printChunks("cosine", allChunks)
-    println("\nПосле фильтрации по порогу $threshold: ${filtered.size} из ${allChunks.size}")
-
-    // Ответ с цитатами и источниками
-    println("\n--- Ответ RAG с источниками ---\n")
-    val answer = askWithContext(filtered, question, deepseek, history)
+    val answer = askWithContext(filtered, question, deepseek, history, gitBranch)
     println(answer)
     return answer
 }
 
 fun main() = runBlocking {
-    val indexFile = File("index.json")
     val jsonParser = Json { ignoreUnknownKeys = true }
-
-    if (!indexFile.exists()) {
-        println("Файл index.json не найден. Сначала запустите индексацию (День 16).")
-        return@runBlocking
-    }
-    val index = jsonParser.decodeFromString<List<IndexEntry>>(indexFile.readText())
-    println("Загружен индекс: ${index.size} чанков")
 
     val props = File("local.properties")
         .takeIf { it.exists() }
@@ -307,36 +311,67 @@ fun main() = runBlocking {
         return@runBlocking
     }
 
-    val threshold = 0.72f
-    println("Порог фильтрации: $threshold")
+    val threshold = 0.5f
+    val gitBranch = getCurrentGitBranch()
 
     OllamaClient().use { ollama ->
         DeepSeekClient(apiKey).use { deepseek ->
 
+            // Загрузка или построение индекса документации (docs/ + README.md)
+            val indexFile = File("index.json")
+            var index = if (indexFile.exists()) {
+                val loaded = jsonParser.decodeFromString<List<IndexEntry>>(indexFile.readText())
+                println("Загружен индекс: ${loaded.size} чанков")
+                loaded
+            } else {
+                println("Индексация документации проекта...")
+                buildIndex(ollama, listOf("docs"))
+            }
+
             println("\n" + "#".repeat(80))
-            println("# МИНИ-ЧАТ С ПАМЯТЬЮ")
-            println("# Команды: 'очистить' — сбросить историю, 'выход' — завершить")
+            println("# АССИСТЕНТ РАЗРАБОТЧИКА RagKotlin")
+            println("# Ветка: $gitBranch")
+            println("# Команды:")
+            println("#   /help <вопрос>  — поиск по документации проекта")
+            println("#   /index          — переиндексация документов")
+            println("#   очистить        — сбросить историю диалога")
+            println("#   выход           — завершить")
             println("#".repeat(80))
 
             val history = mutableListOf<Pair<String, String>>()
 
             while (true) {
                 print("\nВы: ")
-                val question = readlnOrNull()?.trim()
-                if (question.isNullOrBlank() || question == "выход") break
+                val input = readlnOrNull()?.trim()
+                if (input.isNullOrBlank() || input == "выход") break
 
-                if (question == "очистить") {
+                if (input == "очистить") {
                     history.clear()
                     println("\n>> История диалога очищена.")
                     continue
                 }
 
-                val answer = processQuestion(question, index, ollama, deepseek, threshold, history)
-                history.add(question to answer)
+                if (input == "/index") {
+                    println("\nПереиндексация документов...")
+                    index = buildIndex(ollama, listOf("docs"))
+                    continue
+                }
 
-                val hasCitations = answer.contains("[Источник") || answer.contains("Источник")
-                println("\n>> Ссылки на источники: ${if (hasCitations) "ЕСТЬ" else "НЕТ"}")
-                println(">> История: ${history.size} сообщений")
+                if (input.startsWith("/help")) {
+                    val helpQuestion = input.removePrefix("/help").trim()
+                    if (helpQuestion.isEmpty()) {
+                        println("\nИспользование: /help <вопрос о проекте>")
+                        continue
+                    }
+                    val answer = processQuestion(
+                        helpQuestion, index, ollama, deepseek, threshold,
+                        history, gitBranch
+                    )
+                    history.add(helpQuestion to answer)
+                    continue
+                }
+
+                println("Неизвестная команда. Используйте /help <вопрос> для поиска по документации.")
             }
         }
     }
