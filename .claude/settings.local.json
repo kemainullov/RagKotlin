@@ -1,7 +1,9 @@
 {
   "permissions": {
     "allow": [
-      "Bash(git log:*)"
+      "Bash(git log:*)",
+      "WebFetch(domain:docs.github.com)",
+      "WebSearch"
     ]
   }
 }
