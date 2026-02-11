@@ -58,21 +58,16 @@ async function callTool(candidates, args) {
 }
 
 // ---- 3. Fetch PR data via MCP ----
-console.log("\n--- Fetching PR diff ---");
-const diffResult = await callTool(
-  ["get_pull_request_diff", "getPullRequestDiff", "get_pr_diff"],
-  { owner, repo, pull_number: prNumber }
-);
-const diff = extractText(diffResult);
-console.log(`Diff length: ${diff.length} chars`);
-
-console.log("\n--- Fetching PR files ---");
+console.log("\n--- Fetching PR files (includes patches) ---");
 const filesResult = await callTool(
-  ["list_pull_request_files", "listPullRequestFiles", "get_pull_request_files"],
+  ["get_pull_request_files", "list_pull_request_files", "listPullRequestFiles"],
   { owner, repo, pull_number: prNumber }
 );
 const filesText = extractText(filesResult);
-console.log(`Files info length: ${filesText.length} chars`);
+console.log(`PR files response length: ${filesText.length} chars`);
+
+// The files response contains patches per file — use it as the diff
+const diff = filesText;
 
 console.log("\n--- Fetching docs ---");
 const docFiles = ["docs/code-style.md", "docs/architecture.md"];
