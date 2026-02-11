@@ -1,0 +1,92 @@
+name: AI Code Review
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+
+jobs:
+  review:
+    runs-on: self-hosted
+
+    permissions:
+      pull-requests: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get PR diff
+        id: diff
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          DIFF=$(gh pr diff ${{ github.event.pull_request.number }})
+          # Trim to ~15000 chars for DeepSeek context limit
+          DIFF=$(echo "$DIFF" | head -c 15000)
+          # Save to file for reliable handling
+          echo "$DIFF" > /tmp/pr_diff.txt
+
+      - name: Read project docs
+        id: docs
+        run: |
+          DOCS=""
+          for f in docs/code-style.md docs/architecture.md; do
+            if [ -f "$f" ]; then
+              DOCS="$DOCS
+          --- $f ---
+          $(cat "$f")"
+            fi
+          done
+          echo "$DOCS" > /tmp/project_docs.txt
+
+      - name: Call DeepSeek API for review
+        id: review
+        env:
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+        run: |
+          DIFF=$(cat /tmp/pr_diff.txt)
+          DOCS=$(cat /tmp/project_docs.txt)
+
+          # Build JSON payload with jq for proper escaping
+          PAYLOAD=$(jq -n \
+            --arg docs "$DOCS" \
+            --arg diff "$DIFF" \
+            '{
+              model: "deepseek-chat",
+              messages: [
+                {
+                  role: "system",
+                  content: ("Ты — ревьюер проекта RagKotlin. Вот правила стиля и архитектура проекта:\n\n" + $docs + "\n\nПроанализируй diff и выдай: найденные проблемы, потенциальные баги, нарушения стиля, советы по улучшению. Отвечай на русском языке в формате Markdown.")
+                },
+                {
+                  role: "user",
+                  content: ("Вот diff pull request для ревью:\n\n```diff\n" + $diff + "\n```")
+                }
+              ],
+              temperature: 0.3
+            }')
+
+          RESPONSE=$(curl -s -X POST "https://api.deepseek.com/v1/chat/completions" \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer $DEEPSEEK_API_KEY" \
+            -d "$PAYLOAD")
+
+          # Extract review text from response
+          REVIEW=$(echo "$RESPONSE" | jq -r '.choices[0].message.content // empty')
+
+          if [ -z "$REVIEW" ]; then
+            echo "::error::DeepSeek API returned no review content"
+            echo "Raw response: $RESPONSE"
+            REVIEW="Ошибка: не удалось получить ревью от DeepSeek API."
+          fi
+
+          echo "$REVIEW"
+
+          # Write to Step Summary
+          {
+            echo "## AI Code Review"
+            echo ""
+            echo "$REVIEW"
+          } >> "$GITHUB_STEP_SUMMARY"
