@@ -1,0 +1,109 @@
+{
+  "users": [
+    {
+      "id": 1,
+      "name": "Иван Петров",
+      "email": "ivan.petrov@example.com",
+      "plan": "pro",
+      "registeredAt": "2025-01-15"
+    },
+    {
+      "id": 2,
+      "name": "Мария Сидорова",
+      "email": "maria.s@example.com",
+      "plan": "free",
+      "registeredAt": "2025-02-01"
+    },
+    {
+      "id": 3,
+      "name": "Алексей Козлов",
+      "email": "a.kozlov@company.ru",
+      "plan": "enterprise",
+      "registeredAt": "2024-11-20"
+    },
+    {
+      "id": 4,
+      "name": "Елена Новикова",
+      "email": "elena.n@startup.io",
+      "plan": "pro",
+      "registeredAt": "2025-03-10"
+    }
+  ],
+  "tickets": [
+    {
+      "id": 101,
+      "userId": 1,
+      "status": "open",
+      "priority": "high",
+      "subject": "Не работает авторизация DeepSeek",
+      "createdAt": "2025-06-01",
+      "messages": [
+        "Ввожу API-ключ в local.properties, но при запросе получаю ошибку 401 Unauthorized.",
+        "Пробовал заново генерировать ключ на platform.deepseek.com — та же ошибка.",
+        "Ключ точно правильный, проверял через curl — работает."
+      ]
+    },
+    {
+      "id": 102,
+      "userId": 2,
+      "status": "open",
+      "priority": "medium",
+      "subject": "Ollama не отвечает после обновления",
+      "createdAt": "2025-06-03",
+      "messages": [
+        "Обновила Ollama до последней версии, теперь при запуске RagKotlin получаю Connection refused.",
+        "ollama serve выдаёт ошибку порта.",
+        "Порт 11434 чем-то занят."
+      ]
+    },
+    {
+      "id": 103,
+      "userId": 3,
+      "status": "resolved",
+      "priority": "low",
+      "subject": "Как добавить свои документы в индекс",
+      "createdAt": "2025-05-20",
+      "messages": [
+        "Хочу проиндексировать внутреннюю документацию компании. Куда положить файлы?",
+        "Разобрался — нужно положить .md файлы в docs/ и выполнить /index."
+      ]
+    },
+    {
+      "id": 104,
+      "userId": 1,
+      "status": "open",
+      "priority": "medium",
+      "subject": "Таймаут при больших документах",
+      "createdAt": "2025-06-05",
+      "messages": [
+        "При индексации большого файла (50+ страниц) процесс зависает.",
+        "В логах видно, что Ollama embed отвечает по 30 секунд на каждый чанк."
+      ]
+    },
+    {
+      "id": 105,
+      "userId": 4,
+      "status": "open",
+      "priority": "high",
+      "subject": "Ассистент отвечает не на тему",
+      "createdAt": "2025-06-07",
+      "messages": [
+        "Задаю вопрос про архитектуру проекта, а ассистент отвечает про установку.",
+        "Пробовала переиндексировать — не помогло.",
+        "Threshold стоит 0.3, может слишком низкий?"
+      ]
+    },
+    {
+      "id": 106,
+      "userId": 3,
+      "status": "open",
+      "priority": "low",
+      "subject": "Запрос на интеграцию с Confluence",
+      "createdAt": "2025-06-08",
+      "messages": [
+        "Возможно ли подключить RagKotlin к Confluence для автоматической индексации вики-страниц?",
+        "Нужна интеграция через REST API Confluence."
+      ]
+    }
+  ]
+}

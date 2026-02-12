@@ -12,6 +12,12 @@ tasks.named<JavaExec>("run") {
     standardInput = System.`in`
 }
 
+tasks.register<JavaExec>("runSupport") {
+    mainClass.set("SupportAssistant")
+    classpath = sourceSets["main"].runtimeClasspath
+    standardInput = System.`in`
+}
+
 group = "com.project"
 version = "1.0-SNAPSHOT"
 
