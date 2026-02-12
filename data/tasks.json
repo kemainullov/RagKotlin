@@ -1,0 +1,175 @@
+{
+  "project": {
+    "name": "RagKotlin",
+    "currentSprint": "Sprint 5",
+    "sprintGoal": "Интеграция с внешними системами и улучшение поиска",
+    "startDate": "2025-06-01",
+    "endDate": "2025-06-14"
+  },
+  "members": [
+    {
+      "id": 1,
+      "name": "Иван Петров",
+      "role": "backend"
+    },
+    {
+      "id": 2,
+      "name": "Мария Сидорова",
+      "role": "frontend"
+    },
+    {
+      "id": 3,
+      "name": "Алексей Козлов",
+      "role": "devops"
+    },
+    {
+      "id": 4,
+      "name": "Елена Новикова",
+      "role": "qa"
+    }
+  ],
+  "tasks": [
+    {
+      "id": 1,
+      "title": "Кэширование эмбеддингов",
+      "description": "Реализовать кэш эмбеддингов в SQLite, чтобы не пересчитывать при каждой индексации. Ключ — хеш текста чанка.",
+      "status": "in_progress",
+      "priority": "high",
+      "assigneeId": 1,
+      "createdAt": "2025-06-01",
+      "deadline": "2025-06-10",
+      "tags": [
+        "performance",
+        "backend"
+      ],
+      "blockedBy": []
+    },
+    {
+      "id": 2,
+      "title": "Интеграция с Confluence",
+      "description": "Подключить REST API Confluence для автоматического импорта wiki-страниц в RAG-индекс. Поддержка пагинации и инкрементального обновления.",
+      "status": "todo",
+      "priority": "medium",
+      "assigneeId": 1,
+      "createdAt": "2025-06-02",
+      "deadline": "2025-06-13",
+      "tags": [
+        "integration",
+        "backend"
+      ],
+      "blockedBy": [
+        1
+      ]
+    },
+    {
+      "id": 3,
+      "title": "CI/CD пайплайн",
+      "description": "Настроить GitHub Actions: сборка, тесты, линтинг, деплой на staging при мерже в main.",
+      "status": "todo",
+      "priority": "high",
+      "assigneeId": 3,
+      "createdAt": "2025-06-01",
+      "deadline": "2025-06-08",
+      "tags": [
+        "devops",
+        "ci"
+      ],
+      "blockedBy": []
+    },
+    {
+      "id": 4,
+      "title": "UI-дашборд статистики поиска",
+      "description": "Веб-интерфейс с метриками: количество запросов, средний score, популярные темы. Использовать Kotlin/JS или простой HTML + REST.",
+      "status": "todo",
+      "priority": "low",
+      "assigneeId": 2,
+      "createdAt": "2025-06-03",
+      "deadline": "2025-06-14",
+      "tags": [
+        "frontend",
+        "monitoring"
+      ],
+      "blockedBy": [
+        3
+      ]
+    },
+    {
+      "id": 5,
+      "title": "Оптимизация threshold поиска",
+      "description": "Провести A/B-тестирование различных значений threshold (0.3–0.8). Собрать метрики precision/recall на тестовых вопросах.",
+      "status": "todo",
+      "priority": "high",
+      "assigneeId": 4,
+      "createdAt": "2025-06-02",
+      "deadline": "2025-06-12",
+      "tags": [
+        "qa",
+        "search"
+      ],
+      "blockedBy": []
+    },
+    {
+      "id": 6,
+      "title": "Написать интеграционные тесты MCP",
+      "description": "Покрыть тестами MCP-клиент и серверы: CRM, PM. Мокировать stdio, проверить все инструменты.",
+      "status": "review",
+      "priority": "medium",
+      "assigneeId": 4,
+      "createdAt": "2025-06-03",
+      "deadline": "2025-06-09",
+      "tags": [
+        "testing",
+        "qa"
+      ],
+      "blockedBy": []
+    },
+    {
+      "id": 7,
+      "title": "Автодеплой на staging",
+      "description": "Настроить автоматический деплой staging-окружения при успешном прохождении CI. Docker-образ + docker-compose.",
+      "status": "todo",
+      "priority": "medium",
+      "assigneeId": 3,
+      "createdAt": "2025-06-04",
+      "deadline": "2025-06-12",
+      "tags": [
+        "devops",
+        "deploy"
+      ],
+      "blockedBy": [
+        3
+      ]
+    },
+    {
+      "id": 8,
+      "title": "Мультиязычная поддержка эмбеддингов",
+      "description": "Исследовать и подключить multilingual модель эмбеддингов для поддержки документов на разных языках (EN/RU/DE).",
+      "status": "done",
+      "priority": "medium",
+      "assigneeId": 1,
+      "createdAt": "2025-05-28",
+      "deadline": "2025-06-05",
+      "tags": [
+        "research",
+        "backend"
+      ],
+      "blockedBy": []
+    },
+    {
+      "id": 9,
+      "title": "Написать unit-тесты для McpClient",
+      "description": "Разработать и реализовать модульные тесты для компонента McpClient.",
+      "status": "todo",
+      "priority": "medium",
+      "assigneeId": 4,
+      "createdAt": "2026-02-12",
+      "deadline": null,
+      "tags": [
+        "testing",
+        "unit-tests",
+        "backend"
+      ],
+      "blockedBy": []
+    }
+  ]
+}
