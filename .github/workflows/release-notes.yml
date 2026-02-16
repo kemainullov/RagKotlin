@@ -1,0 +1,67 @@
+name: Generate Release Notes
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      from_tag:
+        description: 'From tag (e.g. v1.0)'
+        required: true
+      to_tag:
+        description: 'To tag (e.g. v1.1)'
+        required: true
+      publish:
+        description: 'Publish as GitHub Release'
+        type: boolean
+        default: true
+
+jobs:
+  release-notes:
+    runs-on: self-hosted
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Determine tags
+        id: tags
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "from=${{ github.event.inputs.from_tag }}" >> $GITHUB_OUTPUT
+            echo "to=${{ github.event.inputs.to_tag }}" >> $GITHUB_OUTPUT
+            echo "publish=${{ github.event.inputs.publish }}" >> $GITHUB_OUTPUT
+          else
+            CURRENT_TAG=${GITHUB_REF#refs/tags/}
+            PREVIOUS_TAG=$(git tag --sort=-creatordate | grep -A1 "^${CURRENT_TAG}$" | tail -1)
+            if [ -z "$PREVIOUS_TAG" ] || [ "$PREVIOUS_TAG" = "$CURRENT_TAG" ]; then
+              PREVIOUS_TAG=$(git rev-list --max-parents=0 HEAD | head -1)
+            fi
+            echo "from=$PREVIOUS_TAG" >> $GITHUB_OUTPUT
+            echo "to=$CURRENT_TAG" >> $GITHUB_OUTPUT
+            echo "publish=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Generate Release Notes
+        run: |
+          PUBLISH_FLAG=""
+          if [ "${{ steps.tags.outputs.publish }}" = "true" ]; then
+            PUBLISH_FLAG="--publish"
+          fi
+          ./gradlew runReleaseNotes --args="--owner ${{ github.repository_owner }} --repo ${{ github.event.repository.name }} --from ${{ steps.tags.outputs.from }} --to ${{ steps.tags.outputs.to }} $PUBLISH_FLAG"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          OLLAMA_URL: http://localhost:11434
+
+      - name: Upload Release Notes
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-notes
+          path: RELEASE_NOTES_*.md

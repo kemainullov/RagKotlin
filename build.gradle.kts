@@ -24,6 +24,11 @@ tasks.register<JavaExec>("runTeam") {
     standardInput = System.`in`
 }
 
+tasks.register<JavaExec>("runReleaseNotes") {
+    mainClass.set("ReleaseNotesMain")
+    classpath = sourceSets["main"].runtimeClasspath
+}
+
 group = "com.project"
 version = "1.0-SNAPSHOT"
 
