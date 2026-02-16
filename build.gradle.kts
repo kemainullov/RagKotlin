@@ -8,6 +8,27 @@ application {
     mainClass.set("MainKt")
 }
 
+tasks.named<JavaExec>("run") {
+    standardInput = System.`in`
+}
+
+tasks.register<JavaExec>("runSupport") {
+    mainClass.set("SupportAssistant")
+    classpath = sourceSets["main"].runtimeClasspath
+    standardInput = System.`in`
+}
+
+tasks.register<JavaExec>("runTeam") {
+    mainClass.set("TeamAssistant")
+    classpath = sourceSets["main"].runtimeClasspath
+    standardInput = System.`in`
+}
+
+tasks.register<JavaExec>("runReleaseNotes") {
+    mainClass.set("ReleaseNotesMain")
+    classpath = sourceSets["main"].runtimeClasspath
+}
+
 group = "com.project"
 version = "1.0-SNAPSHOT"
 
