@@ -2,7 +2,9 @@
   "permissions": {
     "allow": [
       "Bash(git log:*)",
-      "Bash(./gradlew compileKotlin:*)"
+      "Bash(./gradlew compileKotlin:*)",
+      "WebFetch(domain:docs.github.com)",
+      "WebSearch"
     ]
   }
 }
